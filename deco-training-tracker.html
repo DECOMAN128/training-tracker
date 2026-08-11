@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DECO Windshield Repair — Training Tracker</title>
+<script src="https://accounts.google.com/gsi/client" async defer onload="onGsiLoad()"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --good:           #0ca30c;
+    --warning:        #fab219;
+    --critical:       #d03b3b;
+    --series-1:       #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --good:           #0ca30c;
+      --warning:        #fab219;
+      --critical:       #e66767;
+      --series-1:       #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0;
+  }
+  header h1 span { color: var(--text-secondary); font-weight: 500; }
+  #auth-area { display: flex; align-items: center; gap: 10px; }
+  #auth-status { font-size: 13px; color: var(--text-secondary); }
+  .btn {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--series-1);
+    color: #fff;
+    cursor: pointer;
+  }
+  .btn.secondary { background: transparent; color: var(--text-primary); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  nav.tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.tabs button {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  nav.tabs button.active {
+    color: var(--series-1);
+    border-bottom-color: var(--series-1);
+  }
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  .panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .note {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    background: var(--page);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 20px;
+  }
+  .note strong { color: var(--text-primary); }
+  .filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters select, .filters input {
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-primary);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--gridline);
+    white-space: nowrap;
+  }
+  th {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  td.name-cell { font-weight: 600; white-space: normal; }
+  td.region-cell { color: var(--text-secondary); white-space: normal; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .badge.good { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .badge.pending { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 14%, transparent); }
+  .badge.critical { color: var(--critical); background: color-mix(in srgb, var(--critical) 14%, transparent); }
+  .badge svg { width: 12px; height: 12px; flex: none; }
+  form.grading-form { display: flex; flex-direction: column; gap: 14px; max-width: 560px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .field select, .field input, .field textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 14px;
+    padding: 9px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--page);
+    color: var(--text-primary);
+  }
+  .field textarea { min-height: 110px; resize: vertical; }
+  .radio-row { display: flex; gap: 16px; }
+  .radio-row label { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; }
+  #grade-status { font-size: 13px; margin-top: 4px; }
+  #grade-status.ok { color: var(--good); }
+  #grade-status.err { color: var(--critical); }
+  .empty-state { color: var(--text-muted); font-size: 13px; padding: 24px; text-align: center; }
+  .signed-out-lock { text-align: center; padding: 48px 24px; color: var(--text-secondary); }
+  .hidden { display: none !important; }
+  .recent-log { margin-top: 24px; }
+  .recent-log h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-secondary); margin: 0 0 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DECO Windshield Repair <span>— Training Tracker</span></h1>
+  <div id="auth-area">
+    <span id="auth-status">Not signed in</span>
+    <button id="signin-btn" class="btn" disabled>Loading sign-in…</button>
+    <button id="signout-btn" class="btn secondary hidden">Sign out</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button id="tab-dashboard-btn" class="active">Dashboard</button>
+  <button id="tab-grading-btn">Grade a Session</button>
+</nav>
+
+<main>
+
+  <div id="signed-out-lock" class="panel signed-out-lock">
+    Sign in with your DECO Google account to load the roster and submit grading.
+  </div>
+
+  <div id="app-content" class="hidden">
+
+    <!-- DASHBOARD TAB -->
+    <section id="tab-dashboard">
+      <div class="note">
+        <strong>Certification rule:</strong> once someone has attended the Day 1 meeting/training and watched a
+        team on-site day, they can go on team visits without being certified — but they can't run a training
+        session themselves until they're certified on training days.
+      </div>
+      <div class="panel">
+        <div class="filters">
+          <select id="filter-region"><option value="">All regions</option></select>
+          <select id="filter-role"><option value="">All roles</option></select>
+          <input id="filter-search" type="text" placeholder="Search name…">
+          <button id="refresh-dashboard-btn" class="btn secondary">Refresh</button>
+        </div>
+        <div id="dashboard-table-wrap">
+          <div class="empty-state">Loading roster…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GRADING TAB -->
+    <section id="tab-grading" class="hidden">
+      <div class="panel">
+        <form class="grading-form" id="grading-form">
+          <div class="field">
+            <label for="g-trainee">Trainee</label>
+            <select id="g-trainee" required>
+              <option value="">Select a person…</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Session type</label>
+            <div class="radio-row">
+              <label><input type="radio" name="session-type" value="Training Day" checked> Training Day</label>
+              <label><input type="radio" name="session-type" value="Team On-Site Day"> Team On-Site Day</label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="g-grader">Grader (your name)</label>
+            <input id="g-grader" type="text" required placeholder="e.g. Jordan Evans">
+          </div>
+          <div class="field">
+            <label for="g-grade">Grade</label>
+            <select id="g-grade" required>
+              <option value="">Select…</option>
+              <option value="5 - Excellent">5 — Excellent</option>
+              <option value="4 - Good">4 — Good</option>
+              <option value="3 - Meets bar">3 — Meets bar</option>
+              <option value="2 - Needs work">2 — Needs work</option>
+              <option value="1 - Not ready">1 — Not ready</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="g-feedback">Feedback</label>
+            <textarea id="g-feedback" required placeholder="What went well, what needs work…"></textarea>
+          </div>
+          <div class="field">
+            <label for="g-audio">Audio recording</label>
+            <input id="g-audio" type="file" accept="audio/*" required>
+          </div>
+          <div>
+            <button type="submit" class="btn" id="grade-submit-btn">Upload &amp; Submit Grade</button>
+            <div id="grade-status"></div>
+          </div>
+        </form>
+        <div class="recent-log">
+          <h3>Recent submissions</h3>
+          <div id="recent-log-wrap"><div class="empty-state">Sign in to view.</div></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<script>
+/* ====================== CONFIG — fill in before hosting ======================
+   1. CLIENT_ID: create in Google Cloud Console → APIs & Services → Credentials
+      → Create Credentials → OAuth Client ID → Web application. Set "Authorized
+      JavaScript origins" to the exact URL this file will be hosted at.
+      See the setup guide that came with this file for the full walkthrough.
+   The three Sheet/Drive IDs below are already created for this project — no
+   need to change them unless you want a different roster or log file.
+================================================================================ */
+const CLIENT_ID = '550922912918-644ak2spqikcj5n56n9ih8jhfs19acqu.apps.googleusercontent.com';
+const ROSTER_SHEET_ID  = '1LAqMWl_sSv0NSvzh2Z4YefgxpAr2RZtjvepYvful66s';
+const GRADING_SHEET_ID = '1TsfoRDTZa73ruDGC1uDaSJJ7WKr4STQRTNNbz7S2H2M';
+const AUDIO_FOLDER_ID  = '1Gj4Z8GeNzThuHXTUY0chEEvQixg2Zr8z';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+/* ============================================================================ */
+
+let accessToken = null;
+let tokenClient = null;
+let rosterRows = [];   // array of objects keyed by header
+let rosterHeaders = [];
+
+const ROSTER_COLS = [
+  'Name','Role','Region','Day 1 - Meeting Attended','Day 1 - Training Watched',
+  'Day 2 - Ops/District Manager Training','Team On-Site Day Completed',
+  'Certified - Team On-Site Days','Certified - Training Days','Notes'
+];
+
+function onGsiLoad() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if (resp.error) { setAuthStatus('Sign-in failed: ' + resp.error); return; }
+      accessToken = resp.access_token;
+      onSignedIn();
+    }
+  });
+  const btn = document.getElementById('signin-btn');
+  btn.disabled = false;
+  btn.textContent = 'Sign in with Google';
+}
+
+document.getElementById('signin-btn').addEventListener('click', () => {
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+});
+document.getElementById('signout-btn').addEventListener('click', () => {
+  if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
+  accessToken = null;
+  document.getElementById('app-content').classList.add('hidden');
+  document.getElementById('signed-out-lock').classList.remove('hidden');
+  document.getElementById('signin-btn').classList.remove('hidden');
+  document.getElementById('signout-btn').classList.add('hidden');
+  setAuthStatus('Not signed in');
+});
+
+function setAuthStatus(text) { document.getElementById('auth-status').textContent = text; }
+
+function onSignedIn() {
+  setAuthStatus('Signed in');
+  document.getElementById('signin-btn').classList.add('hidden');
+  document.getElementById('signout-btn').classList.remove('hidden');
+  document.getElementById('signed-out-lock').classList.add('hidden');
+  document.getElementById('app-content').classList.remove('hidden');
+  loadRoster();
+  loadRecentLog();
+}
+
+/* ---------------------- Tabs ---------------------- */
+document.getElementById('tab-dashboard-btn').addEventListener('click', () => showTab('dashboard'));
+document.getElementById('tab-grading-btn').addEventListener('click', () => showTab('grading'));
+function showTab(name) {
+  document.getElementById('tab-dashboard').classList.toggle('hidden', name !== 'dashboard');
+  document.getElementById('tab-grading').classList.toggle('hidden', name !== 'grading');
+  document.getElementById('tab-dashboard-btn').classList.toggle('active', name === 'dashboard');
+  document.getElementById('tab-grading-btn').classList.toggle('active', name === 'grading');
+}
+
+/* ---------------------- Sheets helpers ---------------------- */
+async function sheetsGet(spreadsheetId, range) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+  if (!res.ok) throw new Error('Sheets read failed: ' + res.status);
+  const data = await res.json();
+  return data.values || [];
+}
+async function sheetsAppend(spreadsheetId, range, row) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [row] })
+  });
+  if (!res.ok) throw new Error('Sheets append failed: ' + res.status);
+  return res.json();
+}
+
+/* ---------------------- Dashboard ---------------------- */
+async function loadRoster() {
+  const wrap = document.getElementById('dashboard-table-wrap');
+  wrap.innerHTML = '<div class="empty-state">Loading roster…</div>';
+  try {
+    const rows = await sheetsGet(ROSTER_SHEET_ID, 'A1:Z1000');
+    if (!rows.length) { wrap.innerHTML = '<div class="empty-state">Roster sheet is empty.</div>'; return; }
+    rosterHeaders = rows[0];
+    rosterRows = rows.slice(1).filter(r => r.some(c => c && c.trim())).map(r => {
+      const obj = {};
+      rosterHeaders.forEach((h, i) => obj[h] = r[i] || '');
+      return obj;
+    });
+    populateFilterOptions();
+    populateTraineeDropdown();
+    renderDashboardTable();
+  } catch (e) {
+    wrap.innerHTML = '<div class="empty-state">Could not load roster: ' + e.message + '</div>';
+  }
+}
+
+function populateFilterOptions() {
+  const regionSel = document.getElementById('filter-region');
+  const roleSel = document.getElementById('filter-role');
+  const regions = [...new Set(rosterRows.map(r => r['Region']).filter(Boolean))].sort();
+  const roles = [...new Set(rosterRows.map(r => r['Role']).filter(Boolean))].sort();
+  regionSel.innerHTML = '<option value="">All regions</option>' + regions.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  roleSel.innerHTML = '<option value="">All roles</option>' + roles.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+}
+
+['filter-region','filter-role','filter-search'].forEach(id => {
+  document.addEventListener('DOMContentLoaded', () => {});
+});
+document.getElementById('filter-region').addEventListener('change', renderDashboardTable);
+document.getElementById('filter-role').addEventListener('change', renderDashboardTable);
+document.getElementById('filter-search').addEventListener('input', renderDashboardTable);
+document.getElementById('refresh-dashboard-btn').addEventListener('click', () => { loadRoster(); loadRecentLog(); });
+
+function renderDashboardTable() {
+  const region = document.getElementById('filter-region').value;
+  const role = document.getElementById('filter-role').value;
+  const search = document.getElementById('filter-search').value.trim().toLowerCase();
+  const filtered = rosterRows.filter(r =>
+    (!region || r['Region'] === region) &&
+    (!role || r['Role'] === role) &&
+    (!search || (r['Name'] || '').toLowerCase().includes(search))
+  );
+  const wrap = document.getElementById('dashboard-table-wrap');
+  if (!filtered.length) { wrap.innerHTML = '<div class="empty-state">No matching people.</div>'; return; }
+
+  const flagCols = ['Day 1 - Meeting Attended','Day 1 - Training Watched','Day 2 - Ops/District Manager Training','Team On-Site Day Completed'];
+  const certCols = ['Certified - Team On-Site Days','Certified - Training Days'];
+
+  let html = '<table><thead><tr>';
+  html += '<th>Name</th><th>Role</th><th>Region</th>';
+  flagCols.forEach(c => html += `<th>${escapeHtml(c.replace('Day 1 - ','D1: ').replace('Day 2 - ','D2: '))}</th>`);
+  certCols.forEach(c => html += `<th>${escapeHtml(c.replace('Certified - ',''))}</th>`);
+  html += '</tr></thead><tbody>';
+
+  filtered.forEach(r => {
+    html += '<tr>';
+    html += `<td class="name-cell">${escapeHtml(r['Name'])}</td>`;
+    html += `<td>${escapeHtml(r['Role'])}</td>`;
+    html += `<td class="region-cell">${escapeHtml(r['Region'])}</td>`;
+    flagCols.forEach(c => html += `<td>${flagBadge(r[c])}</td>`);
+    certCols.forEach(c => html += `<td>${certBadge(r[c])}</td>`);
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function flagBadge(val) {
+  const isYes = (val || '').trim().toLowerCase() === 'yes';
+  return isYes
+    ? `<span class="badge good">${checkIcon()}Done</span>`
+    : `<span class="badge pending">${dashIcon()}Pending</span>`;
+}
+function certBadge(val) {
+  const isYes = (val || '').trim().toLowerCase() === 'yes';
+  return isYes
+    ? `<span class="badge good">${checkIcon()}Certified</span>`
+    : `<span class="badge critical">${xIcon()}Not certified</span>`;
+}
+function checkIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
+function xIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'; }
+function dashIcon() { return '<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="currentColor"/></svg>'; }
+function escapeHtml(s) { return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------------------- Grading form ---------------------- */
+function populateTraineeDropdown() {
+  const sel = document.getElementById('g-trainee');
+  sel.innerHTML = '<option value="">Select a person…</option>' +
+    rosterRows.map(r => `<option value="${escapeHtml(r['Name'])}">${escapeHtml(r['Name'])} — ${escapeHtml(r['Role'])}</option>`).join('');
+}
+
+document.getElementById('grading-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const statusEl = document.getElementById('grade-status');
+  const btn = document.getElementById('grade-submit-btn');
+  const audioFile = document.getElementById('g-audio').files[0];
+  if (!audioFile) { statusEl.textContent = 'Please choose an audio file.'; statusEl.className = 'err'; return; }
+
+  btn.disabled = true;
+  statusEl.className = '';
+  statusEl.textContent = 'Uploading audio…';
+  try {
+    const fileMeta = await driveCreateFileMetadata(audioFile.name, AUDIO_FOLDER_ID);
+    await driveUploadContent(fileMeta.id, audioFile);
+    const fileInfo = await driveGetFile(fileMeta.id, 'webViewLink');
+
+    statusEl.textContent = 'Saving grade…';
+    const sessionType = document.querySelector('input[name="session-type"]:checked').value;
+    const row = [
+      new Date().toISOString(),
+      document.getElementById('g-trainee').value,
+      sessionType,
+      document.getElementById('g-grader').value,
+      document.getElementById('g-grade').value,
+      document.getElementById('g-feedback').value,
+      fileInfo.webViewLink || ''
+    ];
+    await sheetsAppend(GRADING_SHEET_ID, 'A1:G1', row);
+
+    statusEl.textContent = 'Submitted — thanks!';
+    statusEl.className = 'ok';
+    document.getElementById('grading-form').reset();
+    loadRecentLog();
+  } catch (err) {
+    statusEl.textContent = 'Something went wrong: ' + err.message;
+    statusEl.className = 'err';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function driveCreateFileMetadata(name, parentId) {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parents: [parentId] })
+  });
+  if (!res.ok) throw new Error('Drive file create failed: ' + res.status);
+  return res.json();
+}
+async function driveUploadContent(fileId, file) {
+  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file
+  });
+  if (!res.ok) throw new Error('Drive upload failed: ' + res.status);
+  return res.json();
+}
+async function driveGetFile(fileId, fields) {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=${fields}`, {
+    headers: { Authorization: 'Bearer ' + accessToken }
+  });
+  if (!res.ok) throw new Error('Drive get file failed: ' + res.status);
+  return res.json();
+}
+
+/* ---------------------- Recent submissions ---------------------- */
+async function loadRecentLog() {
+  const wrap = document.getElementById('recent-log-wrap');
+  wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+  try {
+    const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:G1000');
+    if (rows.length <= 1) { wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>'; return; }
+    const body = rows.slice(1).filter(r => r.some(c => c)).slice(-10).reverse();
+    let html = '<table><thead><tr><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th></tr></thead><tbody>';
+    body.forEach(r => {
+      const when = r[0] ? new Date(r[0]).toLocaleString() : '';
+      html += `<tr><td>${escapeHtml(when)}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td><td>${escapeHtml(r[3])}</td><td>${escapeHtml(r[4])}</td><td>${r[6] ? `<a href="${escapeHtml(r[6])}" target="_blank" rel="noopener">Listen</a>` : ''}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = '<div class="empty-state">Could not load log: ' + e.message + '</div>';
+  }
+}
+</script>
+</body>
+</html>
