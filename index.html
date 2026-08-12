@@ -255,8 +255,8 @@
   .hidden { display: none !important; }
   .recent-log { margin-top: 24px; }
   .recent-log h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-secondary); margin: 0 0 10px; }
-  #aiGradingResult:empty { display: none; }
-  #aiGradingResult {
+  .ai-result-box:empty { display: none; }
+  .ai-result-box {
     margin-top: 16px;
     padding: 18px 20px;
     border: 1px solid var(--border);
@@ -264,7 +264,7 @@
     background: var(--page);
     font-size: 13px;
   }
-  #aiGradingResult h4 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
+  .ai-result-box h4 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
   .ai-summary-row {
     display: flex;
     gap: 28px;
@@ -282,27 +282,27 @@
     color: var(--text-secondary);
   }
   .ai-stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; }
-  #aiGradingResult table {
+  .ai-result-box table {
     width: 100%;
     border-collapse: collapse;
     font-size: 13px;
     margin: 0 0 18px;
   }
-  #aiGradingResult th, #aiGradingResult td {
+  .ai-result-box th, .ai-result-box td {
     text-align: left;
     padding: 8px 10px;
     border-bottom: 1px solid var(--gridline);
     white-space: normal;
     vertical-align: top;
   }
-  #aiGradingResult th {
+  .ai-result-box th {
     font-weight: 600;
     color: var(--text-secondary);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.02em;
   }
-  #aiGradingResult td.ai-section-cell { font-weight: 600; white-space: normal; }
+  .ai-result-box td.ai-section-cell { font-weight: 600; white-space: normal; }
   .ai-callouts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -330,6 +330,20 @@
   .ai-callout.focus .ai-callout-label { color: var(--warning); }
   .ai-callout-item { margin: 2px 0; }
   .ai-note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 6px 0 0; }
+  .log-table td.log-chevron-cell { width: 22px; padding-right: 0; }
+  .log-chevron {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--text-muted);
+    transition: transform 0.15s ease, color 0.15s ease;
+  }
+  .log-row.has-ai { cursor: pointer; }
+  .log-row.has-ai:hover { background: color-mix(in srgb, var(--brand-orange) 10%, var(--page)); }
+  .log-row.open { background: color-mix(in srgb, var(--brand-orange) 14%, var(--page)); }
+  .log-row.open .log-chevron { transform: rotate(90deg); color: var(--brand-orange); }
+  .log-row td, .log-detail-row td { white-space: nowrap; }
+  .log-detail-row td { padding: 0; background: var(--surface-1); }
+  .log-detail-row .ai-result-box { margin: 0; border: none; border-radius: 0; background: transparent; padding: 18px 24px; }
 </style>
 </head>
 <body>
@@ -429,7 +443,7 @@
           </div>
         </form>
         <div id="aiGradingStatus" class="note hidden"></div>
-        <div id="aiGradingResult"></div>
+        <div id="aiGradingResult" class="ai-result-box"></div>
         <div class="recent-log">
           <h3>Recent submissions</h3>
           <div id="recent-log-wrap"><div class="empty-state">Sign in to view.</div></div>
@@ -875,8 +889,8 @@ function certifiedBadge(certified) {
   return `<span class="badge pending">${dashIcon()}${escapeHtml(certified || 'Unknown')}</span>`;
 }
 
-function renderAiGradingResult(result) {
-  const container = document.getElementById('aiGradingResult');
+function renderAiGradingResult(result, container) {
+  container = container || document.getElementById('aiGradingResult');
   if (!container) return;
 
   const maxPossible = SESSION_MAX_POSSIBLE[result.session_type] || '';
@@ -929,16 +943,58 @@ async function loadRecentLog() {
   wrap.innerHTML = '<div class="empty-state">Loading…</div>';
   if (!(await ensureFreshToken())) return;
   try {
-    const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:G1000');
+    const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:S1000');
     if (rows.length <= 1) { wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>'; return; }
     const body = rows.slice(1).filter(r => r.some(c => c)).slice(-10).reverse();
-    let html = '<table><thead><tr><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th></tr></thead><tbody>';
-    body.forEach(r => {
+
+    // Pre-parse each row's AI JSON (column S, index 18) so we know which rows are expandable.
+    const parsedAi = body.map(r => {
+      if (!r[18]) return null;
+      try { return JSON.parse(r[18]); } catch (e) { return null; }
+    });
+
+    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th></tr></thead><tbody>';
+    body.forEach((r, i) => {
       const when = r[0] ? new Date(r[0]).toLocaleString() : '';
-      html += `<tr><td>${escapeHtml(when)}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td><td>${escapeHtml(r[3])}</td><td>${escapeHtml(r[4])}</td><td>${r[6] ? `<a href="${escapeHtml(r[6])}" target="_blank" rel="noopener">Listen</a>` : ''}</td></tr>`;
+      const audioCell = r[6] ? `<a href="${escapeHtml(r[6])}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>` : '';
+      const hasAi = !!parsedAi[i];
+      const chevron = hasAi ? '<span class="log-chevron">&#9656;</span>' : '';
+      html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}">` +
+        `<td class="log-chevron-cell">${chevron}</td>` +
+        `<td>${escapeHtml(when)}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td>` +
+        `<td>${escapeHtml(r[3])}</td><td>${escapeHtml(r[4])}</td><td>${audioCell}</td></tr>`;
+      if (hasAi) {
+        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="7"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
+      }
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;
+
+    // Wire up click-to-expand on rows that have an AI result, one open at a time.
+    body.forEach((r, i) => {
+      const aiResult = parsedAi[i];
+      if (!aiResult) return;
+      const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${i}"]`);
+      const detailRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${i}"]`);
+      if (!headerRow || !detailRow) return;
+      let rendered = false;
+      headerRow.addEventListener('click', () => {
+        const isOpen = headerRow.classList.contains('open');
+        wrap.querySelectorAll('.log-row.open').forEach(el => {
+          el.classList.remove('open');
+          const otherRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${el.getAttribute('data-row-index')}"]`);
+          if (otherRow) otherRow.classList.add('hidden');
+        });
+        if (!isOpen) {
+          headerRow.classList.add('open');
+          detailRow.classList.remove('hidden');
+          if (!rendered) {
+            renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`));
+            rendered = true;
+          }
+        }
+      });
+    });
   } catch (e) {
     wrap.innerHTML = '<div class="empty-state">Could not load log: ' + e.message + '</div>';
   }
