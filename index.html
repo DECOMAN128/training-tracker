@@ -153,6 +153,7 @@
     border-radius: 999px;
   }
   .badge.good { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+  .badge.warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
   .badge.pending { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 14%, transparent); }
   .badge.critical { color: var(--critical); background: color-mix(in srgb, var(--critical) 14%, transparent); }
   .badge svg { width: 12px; height: 12px; flex: none; }
@@ -187,14 +188,78 @@
   #aiGradingResult:empty { display: none; }
   #aiGradingResult {
     margin-top: 16px;
-    padding: 14px 16px;
+    padding: 18px 20px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--page);
     font-size: 13px;
   }
-  #aiGradingResult h4 { margin: 0 0 8px; font-size: 14px; }
-  #aiGradingResult table { margin-top: 8px; margin-bottom: 8px; }
+  #aiGradingResult h4 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
+  .ai-summary-row {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .ai-stat { display: flex; flex-direction: column; gap: 4px; }
+  .ai-stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+  }
+  .ai-stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  #aiGradingResult table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin: 0 0 18px;
+  }
+  #aiGradingResult th, #aiGradingResult td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--gridline);
+    white-space: normal;
+    vertical-align: top;
+  }
+  #aiGradingResult th {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  #aiGradingResult td.ai-section-cell { font-weight: 600; white-space: normal; }
+  .ai-callouts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .ai-callout {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .ai-callout-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin-bottom: 6px;
+  }
+  .ai-callout.strong .ai-callout-label { color: var(--good); }
+  .ai-callout.weak .ai-callout-label { color: var(--critical); }
+  .ai-callout.focus .ai-callout-label { color: var(--warning); }
+  .ai-callout-item { margin: 2px 0; }
+  .ai-note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 6px 0 0; }
 </style>
 </head>
 <body>
@@ -616,29 +681,70 @@ async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerNam
   }
 }
 
+// Same totals the Apps Script backend uses (Code.gs MAX_POSSIBLE) — the API
+// response itself doesn't include max_possible, so it's re-derived here from
+// session_type to show "score / max" in the summary row.
+const SESSION_MAX_POSSIBLE = { 'Team On-Site Day': 50, 'Training Day': 110 };
+
+function scoreBadge(score, evidenceBasis) {
+  if (evidenceBasis === 'insufficient_evidence' || score == null) {
+    return `<span class="badge pending">${dashIcon()}Insufficient evidence</span>`;
+  }
+  const cls = score >= 8 ? 'good' : score >= 5 ? 'warning' : 'critical';
+  return `<span class="badge ${cls}">${escapeHtml(String(score))}/10</span>`;
+}
+
+function certifiedBadge(certified) {
+  if (certified === 'Yes') return `<span class="badge good">${checkIcon()}Certified</span>`;
+  if (certified === 'No') return `<span class="badge critical">${xIcon()}Not certified</span>`;
+  return `<span class="badge pending">${dashIcon()}${escapeHtml(certified || 'Unknown')}</span>`;
+}
+
 function renderAiGradingResult(result) {
   const container = document.getElementById('aiGradingResult');
   if (!container) return;
 
+  const maxPossible = SESSION_MAX_POSSIBLE[result.session_type] || '';
   const sectionRows = Object.entries(result.sections || {}).map(([key, val]) => {
-    const label = key.replace(/_/g, ' ');
-    const scoreText = (val.evidence_basis === 'insufficient_evidence' || val.score == null)
-      ? 'Insufficient evidence'
-      : `${val.score}/10`;
-    return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(scoreText)}</td><td>${escapeHtml(val.evidence || '')}</td></tr>`;
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return `<tr>
+      <td class="ai-section-cell">${escapeHtml(label)}</td>
+      <td>${scoreBadge(val.score, val.evidence_basis)}</td>
+      <td>${escapeHtml(val.evidence || '')}</td>
+    </tr>`;
   }).join('');
+
+  const calloutBlock = (label, cls, items) => {
+    if (!items || !items.length) return '';
+    return `<div class="ai-callout ${cls}">
+      <span class="ai-callout-label">${escapeHtml(label)}</span>
+      ${items.map(i => `<div class="ai-callout-item">${escapeHtml(i)}</div>`).join('')}
+    </div>`;
+  };
 
   container.innerHTML = `
     <h4>AI Grading Result</h4>
-    <p><strong>Total:</strong> ${escapeHtml(String(result.total_score ?? 'N/A'))} &nbsp; <strong>Certified:</strong> ${escapeHtml(String(result.certified))}</p>
-    <table border="1" cellpadding="4"><thead><tr><th>Section</th><th>Score</th><th>Evidence</th></tr></thead>
+    <div class="ai-summary-row">
+      <div class="ai-stat">
+        <span class="ai-stat-label">Total score</span>
+        <span class="ai-stat-value">${escapeHtml(String(result.total_score ?? 'N/A'))}${maxPossible ? ' / ' + maxPossible : ''}</span>
+      </div>
+      <div class="ai-stat">
+        <span class="ai-stat-label">Certified</span>
+        <span class="ai-stat-value">${certifiedBadge(result.certified)}</span>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Section</th><th>Score</th><th>Evidence</th></tr></thead>
       <tbody>${sectionRows}</tbody>
     </table>
-    <p><strong>Strong areas:</strong> ${escapeHtml((result.strong_areas || []).join('; '))}</p>
-    <p><strong>Weak areas:</strong> ${escapeHtml((result.weak_areas || []).join('; '))}</p>
-    <p><strong>Focus areas:</strong> ${escapeHtml((result.focus_areas || []).join('; '))}</p>
-    ${result.day1_carryover_notes ? `<p><strong>Day 1 carryover notes:</strong> ${escapeHtml(result.day1_carryover_notes)}</p>` : ''}
-    ${result.notes_for_human_reviewer ? `<p><em>Reviewer notes: ${escapeHtml(result.notes_for_human_reviewer)}</em></p>` : ''}
+    <div class="ai-callouts">
+      ${calloutBlock('Strong areas', 'strong', result.strong_areas)}
+      ${calloutBlock('Weak areas', 'weak', result.weak_areas)}
+      ${calloutBlock('Focus areas', 'focus', result.focus_areas)}
+    </div>
+    ${result.day1_carryover_notes ? `<p class="ai-note"><strong>Day 1 carryover notes:</strong> ${escapeHtml(result.day1_carryover_notes)}</p>` : ''}
+    ${result.notes_for_human_reviewer ? `<p class="ai-note"><em>Reviewer notes: ${escapeHtml(result.notes_for_human_reviewer)}</em></p>` : ''}
   `;
 }
 
