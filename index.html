@@ -354,6 +354,31 @@
   .log-row td { white-space: nowrap; }
   .log-detail-row > td { padding: 0; background: var(--surface-1); white-space: normal; }
   .log-detail-row .ai-result-box { margin: 0; border: none; border-radius: 0; background: transparent; padding: 18px 24px; }
+  .log-table td.log-delete-cell { width: 1%; text-align: right; }
+  .log-delete-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  }
+  .log-delete-btn svg { width: 14px; height: 14px; flex: none; }
+  .log-delete-btn:hover { color: var(--critical); background: color-mix(in srgb, var(--critical) 10%, transparent); }
+  .log-delete-btn.armed {
+    color: var(--critical);
+    background: color-mix(in srgb, var(--critical) 14%, transparent);
+    border-color: color-mix(in srgb, var(--critical) 40%, transparent);
+  }
+  .log-delete-btn:disabled { opacity: 0.5; cursor: default; }
+  .log-row.deleting, .log-row.deleting + .log-detail-row { opacity: 0.4; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -657,6 +682,16 @@ async function sheetsAppend(spreadsheetId, range, row) {
   if (!res.ok) throw new Error('Sheets append failed: ' + res.status);
   return res.json();
 }
+async function sheetsClearRange(spreadsheetId, range) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:clear`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  if (!res.ok) throw new Error('Sheets clear failed: ' + res.status);
+  return res.json();
+}
 
 /* ---------------------- Dashboard ---------------------- */
 async function loadRoster() {
@@ -746,6 +781,7 @@ function certBadge(val) {
 function checkIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function xIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'; }
 function dashIcon() { return '<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="3" fill="currentColor"/></svg>'; }
+function trashIcon() { return '<svg viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6M6 6l.6 9.2A1.5 1.5 0 0 0 8.1 16.6h3.8a1.5 1.5 0 0 0 1.5-1.4L14 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
 function escapeHtml(s) { return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* ---------------------- Grading form ---------------------- */
@@ -954,33 +990,39 @@ async function loadRecentLog() {
   try {
     const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:S1000');
     if (rows.length <= 1) { wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>'; return; }
-    const body = rows.slice(1).filter(r => r.some(c => c)).slice(-10).reverse();
+    // Track each row's real sheet row number (1-indexed, header is row 1) before
+    // filtering out blanks, so a delete can clear the exact right row later.
+    const withRowNum = rows.slice(1).map((r, idx) => ({ rowNumber: idx + 2, r })).filter(x => x.r.some(c => c));
+    const body = withRowNum.slice(-10).reverse();
 
     // Pre-parse each row's AI JSON (column S, index 18) so we know which rows are expandable.
-    const parsedAi = body.map(r => {
+    const parsedAi = body.map(({ r }) => {
       if (!r[18]) return null;
       try { return JSON.parse(r[18]); } catch (e) { return null; }
     });
 
-    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th></tr></thead><tbody>';
-    body.forEach((r, i) => {
+    let html = '<table class="log-table"><thead><tr><th></th><th>When</th><th>Trainee</th><th>Type</th><th>Grader</th><th>Grade</th><th>Audio</th><th></th></tr></thead><tbody>';
+    body.forEach(({ r, rowNumber }, i) => {
       const when = r[0] ? new Date(r[0]).toLocaleString() : '';
       const audioCell = r[6] ? `<a href="${escapeHtml(r[6])}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Listen</a>` : '';
       const hasAi = !!parsedAi[i];
       const chevron = hasAi ? '<span class="log-chevron">&#9656;</span>' : '';
-      html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}">` +
+      const deleteCell = `<td class="log-delete-cell">` +
+        `<button type="button" class="log-delete-btn" data-row-index="${i}" data-sheet-row="${rowNumber}" title="Delete this submission">${trashIcon()}<span class="log-delete-label">Delete</span></button>` +
+        `</td>`;
+      html += `<tr class="log-row${hasAi ? ' has-ai' : ''}" data-row-index="${i}" data-sheet-row="${rowNumber}">` +
         `<td class="log-chevron-cell">${chevron}</td>` +
         `<td>${escapeHtml(when)}</td><td>${escapeHtml(r[1])}</td><td>${escapeHtml(r[2])}</td>` +
-        `<td>${escapeHtml(r[3])}</td><td>${escapeHtml(r[4])}</td><td>${audioCell}</td></tr>`;
+        `<td>${escapeHtml(r[3])}</td><td>${escapeHtml(r[4])}</td><td>${audioCell}</td>${deleteCell}</tr>`;
       if (hasAi) {
-        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="7"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
+        html += `<tr class="log-detail-row hidden" data-row-index="${i}"><td colspan="8"><div class="ai-result-box" id="log-detail-${i}"></div></td></tr>`;
       }
     });
     html += '</tbody></table>';
     wrap.innerHTML = html;
 
     // Wire up click-to-expand on rows that have an AI result, one open at a time.
-    body.forEach((r, i) => {
+    body.forEach(({ r }, i) => {
       const aiResult = parsedAi[i];
       if (!aiResult) return;
       const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${i}"]`);
@@ -1001,6 +1043,49 @@ async function loadRecentLog() {
             renderAiGradingResult(aiResult, document.getElementById(`log-detail-${i}`));
             rendered = true;
           }
+        }
+      });
+    });
+
+    // Wire up delete buttons: first click arms a confirmation (auto-disarms after
+    // a few seconds if not confirmed), second click while armed actually deletes.
+    // Deleting clears the row's values in the sheet rather than shifting rows
+    // around, and there is no in-app undo — it's a real removal, not a soft-delete.
+    wrap.querySelectorAll('.log-delete-btn').forEach(btn => {
+      let armTimeout = null;
+      btn.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        if (!btn.classList.contains('armed')) {
+          btn.classList.add('armed');
+          btn.querySelector('.log-delete-label').textContent = 'Confirm delete?';
+          armTimeout = setTimeout(() => {
+            btn.classList.remove('armed');
+            btn.querySelector('.log-delete-label').textContent = 'Delete';
+          }, 4000);
+          return;
+        }
+        clearTimeout(armTimeout);
+        btn.disabled = true;
+        btn.querySelector('.log-delete-label').textContent = 'Deleting…';
+        const rowNumber = btn.getAttribute('data-sheet-row');
+        const rowIndex = btn.getAttribute('data-row-index');
+        const headerRow = wrap.querySelector(`tr.log-row[data-row-index="${rowIndex}"]`);
+        const detailRow = wrap.querySelector(`tr.log-detail-row[data-row-index="${rowIndex}"]`);
+        if (headerRow) headerRow.classList.add('deleting');
+        try {
+          await sheetsClearRange(GRADING_SHEET_ID, `A${rowNumber}:S${rowNumber}`);
+          if (detailRow) detailRow.remove();
+          if (headerRow) headerRow.remove();
+          if (!wrap.querySelector('tr.log-row')) {
+            wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>';
+          }
+        } catch (e) {
+          if (headerRow) headerRow.classList.remove('deleting');
+          btn.disabled = false;
+          btn.classList.remove('armed');
+          btn.querySelector('.log-delete-label').textContent = 'Delete failed';
+          setTimeout(() => { btn.querySelector('.log-delete-label').textContent = 'Delete'; }, 3000);
+          console.error(e);
         }
       });
     });
