@@ -263,6 +263,9 @@
     border-radius: 10px;
     background: var(--page);
     font-size: 13px;
+    white-space: normal;
+    max-width: 100%;
+    overflow-wrap: break-word;
   }
   .ai-result-box h4 { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
   .ai-summary-row {
@@ -282,27 +285,34 @@
     color: var(--text-secondary);
   }
   .ai-stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; }
-  .ai-result-box table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
+  .ai-section-list {
     margin: 0 0 18px;
+    border-top: 1px solid var(--gridline);
   }
-  .ai-result-box th, .ai-result-box td {
-    text-align: left;
-    padding: 8px 10px;
+  .ai-section-item {
+    padding: 12px 2px;
     border-bottom: 1px solid var(--gridline);
     white-space: normal;
-    vertical-align: top;
   }
-  .ai-result-box th {
+  .ai-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 5px;
+  }
+  .ai-section-name {
     font-weight: 600;
-    color: var(--text-secondary);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
+    font-size: 13px;
   }
-  .ai-result-box td.ai-section-cell { font-weight: 600; white-space: normal; }
+  .ai-section-evidence {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
   .ai-callouts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -341,8 +351,8 @@
   .log-row.has-ai:hover { background: color-mix(in srgb, var(--brand-orange) 10%, var(--page)); }
   .log-row.open { background: color-mix(in srgb, var(--brand-orange) 14%, var(--page)); }
   .log-row.open .log-chevron { transform: rotate(90deg); color: var(--brand-orange); }
-  .log-row td, .log-detail-row td { white-space: nowrap; }
-  .log-detail-row td { padding: 0; background: var(--surface-1); }
+  .log-row td { white-space: nowrap; }
+  .log-detail-row > td { padding: 0; background: var(--surface-1); white-space: normal; }
   .log-detail-row .ai-result-box { margin: 0; border: none; border-radius: 0; background: transparent; padding: 18px 24px; }
 </style>
 </head>
@@ -894,13 +904,15 @@ function renderAiGradingResult(result, container) {
   if (!container) return;
 
   const maxPossible = SESSION_MAX_POSSIBLE[result.session_type] || '';
-  const sectionRows = Object.entries(result.sections || {}).map(([key, val]) => {
+  const sectionItems = Object.entries(result.sections || {}).map(([key, val]) => {
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    return `<tr>
-      <td class="ai-section-cell">${escapeHtml(label)}</td>
-      <td>${scoreBadge(val.score, val.evidence_basis)}</td>
-      <td>${escapeHtml(val.evidence || '')}</td>
-    </tr>`;
+    return `<div class="ai-section-item">
+      <div class="ai-section-header">
+        <span class="ai-section-name">${escapeHtml(label)}</span>
+        ${scoreBadge(val.score, val.evidence_basis)}
+      </div>
+      <p class="ai-section-evidence">${escapeHtml(val.evidence || '')}</p>
+    </div>`;
   }).join('');
 
   const calloutBlock = (label, cls, items) => {
@@ -923,10 +935,7 @@ function renderAiGradingResult(result, container) {
         <span class="ai-stat-value">${certifiedBadge(result.certified)}</span>
       </div>
     </div>
-    <table>
-      <thead><tr><th>Section</th><th>Score</th><th>Evidence</th></tr></thead>
-      <tbody>${sectionRows}</tbody>
-    </table>
+    <div class="ai-section-list">${sectionItems}</div>
     <div class="ai-callouts">
       ${calloutBlock('Strong areas', 'strong', result.strong_areas)}
       ${calloutBlock('Weak areas', 'weak', result.weak_areas)}
