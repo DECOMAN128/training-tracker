@@ -184,6 +184,17 @@
   .hidden { display: none !important; }
   .recent-log { margin-top: 24px; }
   .recent-log h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-secondary); margin: 0 0 10px; }
+  #aiGradingResult:empty { display: none; }
+  #aiGradingResult {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--page);
+    font-size: 13px;
+  }
+  #aiGradingResult h4 { margin: 0 0 8px; font-size: 14px; }
+  #aiGradingResult table { margin-top: 8px; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -275,6 +286,8 @@
             <div id="grade-status"></div>
           </div>
         </form>
+        <div id="aiGradingStatus" class="note hidden"></div>
+        <div id="aiGradingResult"></div>
         <div class="recent-log">
           <h3>Recent submissions</h3>
           <div id="recent-log-wrap"><div class="empty-state">Sign in to view.</div></div>
@@ -299,6 +312,8 @@ const ROSTER_SHEET_ID  = '1LAqMWl_sSv0NSvzh2Z4YefgxpAr2RZtjvepYvful66s';
 const GRADING_SHEET_ID = '1TsfoRDTZa73ruDGC1uDaSJJ7WKr4STQRTNNbz7S2H2M';
 const AUDIO_FOLDER_ID  = '1Gj4Z8GeNzThuHXTUY0chEEvQixg2Zr8z';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+// AI grading: the Web App URL from deploying Code.gs in Apps Script (Deploy > New deployment > Web app).
+const AI_GRADING_ENDPOINT = 'https://script.google.com/a/macros/decorepair.com/s/AKfycbyWTE5fjMMSr2pExK0EuyuExZhXT0Por7k2Hh6vXeSrXRbAlDT7qrOsErKz6W_SnY3I/exec';
 /* ============================================================================ */
 
 let accessToken = null;
@@ -487,6 +502,10 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
   btn.disabled = true;
   statusEl.className = '';
   statusEl.textContent = 'Uploading audio…';
+  const aiStatusEl = document.getElementById('aiGradingStatus');
+  const aiResultEl = document.getElementById('aiGradingResult');
+  if (aiStatusEl) { aiStatusEl.classList.add('hidden'); aiStatusEl.textContent = ''; }
+  if (aiResultEl) aiResultEl.innerHTML = '';
   try {
     const fileMeta = await driveCreateFileMetadata(audioFile.name, AUDIO_FOLDER_ID);
     await driveUploadContent(fileMeta.id, audioFile);
@@ -494,11 +513,13 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
 
     statusEl.textContent = 'Saving grade…';
     const sessionType = document.querySelector('input[name="session-type"]:checked').value;
+    const traineeName = document.getElementById('g-trainee').value;
+    const graderName = document.getElementById('g-grader').value;
     const row = [
       new Date().toISOString(),
-      document.getElementById('g-trainee').value,
+      traineeName,
       sessionType,
-      document.getElementById('g-grader').value,
+      graderName,
       document.getElementById('g-grade').value,
       document.getElementById('g-feedback').value,
       fileInfo.webViewLink || ''
@@ -509,6 +530,19 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
     statusEl.className = 'ok';
     document.getElementById('grading-form').reset();
     loadRecentLog();
+
+    // Kick off AI grading in the background — this form only has one name field
+    // (the person being observed/trained), so it's used for both traineeName and
+    // regionalManagerName since both rubrics are really grading that same person's
+    // performance during the session.
+    gradeSessionWithAI({
+      sessionType,
+      traineeName,
+      regionalManagerName: traineeName,
+      graderName,
+      date: new Date().toISOString().slice(0, 10),
+      audioFileId: fileMeta.id
+    });
   } catch (err) {
     statusEl.textContent = 'Something went wrong: ' + err.message;
     statusEl.className = 'err';
@@ -541,6 +575,71 @@ async function driveGetFile(fileId, fields) {
   });
   if (!res.ok) throw new Error('Drive get file failed: ' + res.status);
   return res.json();
+}
+
+/* ---------------------- AI grading ---------------------- */
+async function gradeSessionWithAI({ sessionType, traineeName, regionalManagerName, graderName, date, audioFileId }) {
+  const statusEl = document.getElementById('aiGradingStatus');
+  if (statusEl) {
+    statusEl.classList.remove('hidden');
+    statusEl.textContent = 'AI grading in progress… this can take a minute or two for longer audio.';
+  }
+
+  try {
+    const response = await fetch(AI_GRADING_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids a CORS preflight against Apps Script
+      body: JSON.stringify({
+        sessionType,          // "Team On-Site Day" or "Training Day"
+        traineeName,          // Site Operator(s) being observed
+        regionalManagerName,  // RM/trainer being graded
+        graderName,           // whoever is submitting this grade
+        date,                 // "YYYY-MM-DD"
+        audioFileId           // Drive file ID from the upload that already happened
+      })
+    });
+    const result = await response.json();
+
+    if (!result.ok) {
+      if (statusEl) statusEl.textContent = 'AI grading failed: ' + result.error;
+      console.error('AI grading error:', result.error);
+      return null;
+    }
+
+    if (statusEl) statusEl.textContent = 'AI grading complete — see result below.';
+    renderAiGradingResult(result);
+    return result;
+  } catch (err) {
+    if (statusEl) statusEl.textContent = 'AI grading request failed: ' + err.message;
+    console.error(err);
+    return null;
+  }
+}
+
+function renderAiGradingResult(result) {
+  const container = document.getElementById('aiGradingResult');
+  if (!container) return;
+
+  const sectionRows = Object.entries(result.sections || {}).map(([key, val]) => {
+    const label = key.replace(/_/g, ' ');
+    const scoreText = (val.evidence_basis === 'insufficient_evidence' || val.score == null)
+      ? 'Insufficient evidence'
+      : `${val.score}/10`;
+    return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(scoreText)}</td><td>${escapeHtml(val.evidence || '')}</td></tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <h4>AI Grading Result</h4>
+    <p><strong>Total:</strong> ${escapeHtml(String(result.total_score ?? 'N/A'))} &nbsp; <strong>Certified:</strong> ${escapeHtml(String(result.certified))}</p>
+    <table border="1" cellpadding="4"><thead><tr><th>Section</th><th>Score</th><th>Evidence</th></tr></thead>
+      <tbody>${sectionRows}</tbody>
+    </table>
+    <p><strong>Strong areas:</strong> ${escapeHtml((result.strong_areas || []).join('; '))}</p>
+    <p><strong>Weak areas:</strong> ${escapeHtml((result.weak_areas || []).join('; '))}</p>
+    <p><strong>Focus areas:</strong> ${escapeHtml((result.focus_areas || []).join('; '))}</p>
+    ${result.day1_carryover_notes ? `<p><strong>Day 1 carryover notes:</strong> ${escapeHtml(result.day1_carryover_notes)}</p>` : ''}
+    ${result.notes_for_human_reviewer ? `<p><em>Reviewer notes: ${escapeHtml(result.notes_for_human_reviewer)}</em></p>` : ''}
+  `;
 }
 
 /* ---------------------- Recent submissions ---------------------- */
