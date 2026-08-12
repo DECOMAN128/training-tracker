@@ -16,9 +16,18 @@
     --gridline:       #e1e0d9;
     --border:         rgba(11,11,11,0.10);
     --good:           #0ca30c;
-    --warning:        #fab219;
+    --warning:        #a16207;
     --critical:       #d03b3b;
-    --series-1:       #2a78d6;
+    /* DECO brand: black, orange, white. --accent is the orange used for
+       interactive elements on light surfaces (buttons, links, active tab) —
+       chosen dark enough to keep white-on-orange text at AA contrast.
+       --brand-orange is the brighter orange used against black surfaces
+       (header stripe, brand accents on dark backgrounds). */
+    --brand-black:    #0b0b0b;
+    --brand-white:    #ffffff;
+    --brand-orange:   #ff6b00;
+    --accent:         #c2410c;
+    --series-1:       var(--accent);
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
@@ -31,12 +40,14 @@
       --gridline:       #2c2c2a;
       --border:         rgba(255,255,255,0.10);
       --good:           #0ca30c;
-      --warning:        #fab219;
+      --warning:        #fdba31;
       --critical:       #e66767;
-      --series-1:       #3987e5;
+      --brand-orange:   #ff6b00;
+      --accent:         #ff6b00;
+      --series-1:       var(--accent);
     }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; accent-color: var(--accent); }
   body {
     margin: 0;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -47,30 +58,41 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
     padding: 16px 24px;
-    background: var(--surface-1);
-    border-bottom: 1px solid var(--border);
+    background: var(--brand-black);
+    border-bottom: 3px solid var(--brand-orange);
   }
   header h1 {
     font-size: 17px;
     font-weight: 600;
     margin: 0;
+    color: var(--brand-white);
   }
-  header h1 span { color: var(--text-secondary); font-weight: 500; }
+  header h1 span { color: rgba(255,255,255,0.62); font-weight: 500; }
   #auth-area { display: flex; align-items: center; gap: 10px; }
-  #auth-status { font-size: 13px; color: var(--text-secondary); }
+  #auth-status { font-size: 13px; color: rgba(255,255,255,0.72); }
   .btn {
     font: inherit;
     font-size: 13px;
     font-weight: 600;
     padding: 8px 14px;
     border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--series-1);
-    color: #fff;
+    border: 1px solid transparent;
+    background: var(--accent);
+    color: var(--brand-white);
     cursor: pointer;
+    transition: filter 0.15s ease;
   }
-  .btn.secondary { background: transparent; color: var(--text-primary); }
+  .btn:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn:focus-visible { outline: 2px solid var(--brand-orange); outline-offset: 2px; }
+  header .btn.secondary {
+    background: transparent;
+    color: var(--brand-white);
+    border: 1px solid rgba(255,255,255,0.28);
+  }
+  .btn.secondary { background: transparent; color: var(--text-primary); border: 1px solid var(--border); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   nav.tabs {
     display: flex;
@@ -90,9 +112,10 @@
     color: var(--text-secondary);
     cursor: pointer;
   }
+  nav.tabs button:hover { color: var(--text-primary); }
   nav.tabs button.active {
-    color: var(--series-1);
-    border-bottom-color: var(--series-1);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
   main {
     max-width: 1200px;
@@ -105,6 +128,7 @@
     border-radius: 10px;
     padding: 20px;
     margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
   .note {
     font-size: 13px;
@@ -127,6 +151,12 @@
     background: var(--surface-1);
     color: var(--text-primary);
   }
+  .filters select:focus-visible, .filters input:focus-visible,
+  .field select:focus-visible, .field input:focus-visible, .field textarea:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td {
     text-align: left;
@@ -134,6 +164,7 @@
     border-bottom: 1px solid var(--gridline);
     white-space: nowrap;
   }
+  tbody tr:hover { background: var(--page); }
   th {
     font-weight: 600;
     color: var(--text-secondary);
@@ -392,19 +423,109 @@ const ROSTER_COLS = [
   'Certified - Team On-Site Days','Certified - Training Days','Notes'
 ];
 
+/* ---------------------- Auth persistence ----------------------
+   Google's token client only ever hands back a short-lived (~1hr) access
+   token, kept in a plain JS variable — so a page refresh used to wipe it
+   and force a full interactive sign-in every single time. Fix: cache the
+   token + its expiry in localStorage so a refresh (within the token's
+   lifetime) restores the session instantly with no click, and proactively
+   request a silent renewal in the background before it expires. This
+   removes the "signed out on every refresh" problem for as long as the
+   browser has an active Google session; note that Google's client-side
+   token model has no permanent "stay signed in forever" option — that
+   would require routing auth through a backend that holds a refresh
+   token (e.g. the existing Apps Script), which is a bigger change than
+   this page. */
+const TOKEN_STORAGE_KEY = 'decoTrainingTracker.googleToken';
+let tokenRefreshTimer = null;
+let pendingSilentResolve = null;
+
+function saveToken(token, expiresInSeconds) {
+  const expiresAt = Date.now() + (expiresInSeconds * 1000) - 60000; // 60s safety buffer
+  localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ access_token: token, expires_at: expiresAt }));
+}
+function loadStoredToken() {
+  try {
+    const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.access_token || !parsed.expires_at || parsed.expires_at <= Date.now()) return null;
+    return parsed;
+  } catch (e) { return null; }
+}
+function clearStoredToken() { localStorage.removeItem(TOKEN_STORAGE_KEY); }
+
+function scheduleTokenRefresh(expiresInSeconds) {
+  if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+  const delayMs = Math.max((expiresInSeconds - 120) * 1000, 10000); // refresh ~2min before expiry
+  tokenRefreshTimer = setTimeout(() => { requestSilentToken(); }, delayMs);
+}
+
+// Attempts to get a fresh token without an interactive popup. Works when the
+// browser still has an active Google session and the user already granted
+// this app access — resolves to null (no throw) if that's not possible, so
+// callers can fall back to showing the "Sign in" button.
+function requestSilentToken() {
+  if (!tokenClient) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    pendingSilentResolve = resolve;
+    const settle = (value) => {
+      if (pendingSilentResolve) { pendingSilentResolve(value); pendingSilentResolve = null; }
+    };
+    try {
+      tokenClient.requestAccessToken({ prompt: '' });
+    } catch (e) { settle(null); return; }
+    setTimeout(() => settle(null), 6000); // safety timeout if the callback never fires
+  });
+}
+
+// Ensures `accessToken` is set and fresh before an API call. Returns false
+// (and leaves the UI in signed-out state) if no valid token could be had.
+async function ensureFreshToken() {
+  const stored = loadStoredToken();
+  if (stored) { accessToken = stored.access_token; return true; }
+  const token = await requestSilentToken();
+  if (token) return true;
+  forceSignedOut('Your session expired — please sign in again.');
+  return false;
+}
+
 function onGsiLoad() {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPES,
     callback: (resp) => {
-      if (resp.error) { setAuthStatus('Sign-in failed: ' + resp.error); return; }
+      if (resp.error) {
+        if (pendingSilentResolve) { const r = pendingSilentResolve; pendingSilentResolve = null; r(null); return; }
+        setAuthStatus('Sign-in failed: ' + resp.error);
+        return;
+      }
       accessToken = resp.access_token;
-      onSignedIn();
+      saveToken(accessToken, resp.expires_in);
+      scheduleTokenRefresh(resp.expires_in);
+      if (pendingSilentResolve) {
+        const r = pendingSilentResolve; pendingSilentResolve = null; r(accessToken);
+      } else {
+        onSignedIn();
+      }
     }
   });
+
   const btn = document.getElementById('signin-btn');
   btn.disabled = false;
   btn.textContent = 'Sign in with Google';
+
+  // Restore a still-valid cached session on load (fixes "signed out on
+  // every refresh"); otherwise make one best-effort silent attempt in case
+  // the browser still has an active Google session from a previous visit.
+  const stored = loadStoredToken();
+  if (stored) {
+    accessToken = stored.access_token;
+    scheduleTokenRefresh((stored.expires_at - Date.now()) / 1000);
+    onSignedIn();
+  } else {
+    requestSilentToken().then((token) => { if (token) onSignedIn(); });
+  }
 }
 
 document.getElementById('signin-btn').addEventListener('click', () => {
@@ -412,15 +533,21 @@ document.getElementById('signin-btn').addEventListener('click', () => {
 });
 document.getElementById('signout-btn').addEventListener('click', () => {
   if (accessToken) google.accounts.oauth2.revoke(accessToken, () => {});
+  forceSignedOut('Not signed in');
+});
+
+function setAuthStatus(text) { document.getElementById('auth-status').textContent = text; }
+
+function forceSignedOut(message) {
   accessToken = null;
+  clearStoredToken();
+  if (tokenRefreshTimer) { clearTimeout(tokenRefreshTimer); tokenRefreshTimer = null; }
   document.getElementById('app-content').classList.add('hidden');
   document.getElementById('signed-out-lock').classList.remove('hidden');
   document.getElementById('signin-btn').classList.remove('hidden');
   document.getElementById('signout-btn').classList.add('hidden');
-  setAuthStatus('Not signed in');
-});
-
-function setAuthStatus(text) { document.getElementById('auth-status').textContent = text; }
+  setAuthStatus(message || 'Not signed in');
+}
 
 function onSignedIn() {
   setAuthStatus('Signed in');
@@ -465,6 +592,7 @@ async function sheetsAppend(spreadsheetId, range, row) {
 async function loadRoster() {
   const wrap = document.getElementById('dashboard-table-wrap');
   wrap.innerHTML = '<div class="empty-state">Loading roster…</div>';
+  if (!(await ensureFreshToken())) return;
   try {
     const rows = await sheetsGet(ROSTER_SHEET_ID, 'A1:Z1000');
     if (!rows.length) { wrap.innerHTML = '<div class="empty-state">Roster sheet is empty.</div>'; return; }
@@ -563,6 +691,7 @@ document.getElementById('grading-form').addEventListener('submit', async (e) => 
   const btn = document.getElementById('grade-submit-btn');
   const audioFile = document.getElementById('g-audio').files[0];
   if (!audioFile) { statusEl.textContent = 'Please choose an audio file.'; statusEl.className = 'err'; return; }
+  if (!(await ensureFreshToken())) return;
 
   btn.disabled = true;
   statusEl.className = '';
@@ -752,6 +881,7 @@ function renderAiGradingResult(result) {
 async function loadRecentLog() {
   const wrap = document.getElementById('recent-log-wrap');
   wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+  if (!(await ensureFreshToken())) return;
   try {
     const rows = await sheetsGet(GRADING_SHEET_ID, 'A1:G1000');
     if (rows.length <= 1) { wrap.innerHTML = '<div class="empty-state">No submissions yet.</div>'; return; }
